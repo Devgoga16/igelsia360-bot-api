@@ -61,12 +61,19 @@ COPY . .
 RUN mkdir -p /app/.wwebjs_auth /app/.wwebjs_cache /app/logs \
     && chmod -R 777 /app/.wwebjs_auth /app/.wwebjs_cache /app/logs
 
-# Crear usuario no-root para seguridad
+# Crear usuario no-root para seguridad y su directorio home
 RUN groupadd -r botuser && useradd -r -g botuser -G audio,video botuser \
-    && chown -R botuser:botuser /app
+    && mkdir -p /home/botuser/.local/share/applications \
+    && mkdir -p /home/botuser/.config \
+    && chown -R botuser:botuser /app /home/botuser
 
 # Cambiar a usuario no-root
 USER botuser
+
+# Variables de entorno para Chrome/Puppeteer
+ENV HOME=/home/botuser
+ENV XDG_CONFIG_HOME=/home/botuser/.config
+ENV XDG_CACHE_HOME=/home/botuser/.cache
 
 # Exponer puerto
 EXPOSE 3000

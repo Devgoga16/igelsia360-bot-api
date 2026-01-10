@@ -68,8 +68,11 @@ class WhatsAppService {
             '--mute-audio',
             '--no-default-browser-check',
             '--safebrowsing-disable-auto-update',
-            '--disable-translate'
+            '--disable-translate',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=IsolateOrigins,site-per-process'
           ],
+          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
           timeout: 60000
         }
       });
