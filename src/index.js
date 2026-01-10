@@ -142,12 +142,13 @@ app.use((err, req, res, next) => {
 // ===== INICIO DEL SERVIDOR =====
 
 const server = app.listen(PORT, () => {
+  const baseUrl = process.env.API_URL || `http://localhost:${PORT}`;
   logger.info('='.repeat(50));
   logger.info(`🚀 Servidor iniciado en puerto ${PORT}`);
   logger.info(`📱 API de WhatsApp Bot - Iglesia360`);
-  logger.info(`🌐 URL: http://localhost:${PORT}`);
-  logger.info(`📄 Documentación: http://localhost:${PORT}`);
-  logger.info(`🔗 Ver QR: http://localhost:${PORT}/api/qr-image`);
+  logger.info(`🌐 URL: ${baseUrl}`);
+  logger.info(`📄 Documentación: ${baseUrl}`);
+  logger.info(`🔗 Ver QR: ${baseUrl}/api/qr-image`);
   logger.info('='.repeat(50));
 });
 
