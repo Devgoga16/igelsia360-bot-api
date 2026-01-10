@@ -218,7 +218,7 @@ const pricePerExtraMessage = 0.05; // Cambiar aquí
 
 Agregar en `.env`:
 ```env
-MONGODB_URI=mongodb://mongo:bbl2v9vyemyw2p5g@31.97.133.67:27017/iglesia360bot?authSource=admin&retryWrites=true&w=majority
+MONGODB_URI=XXXXXXXXXXXXXXXXXXX
 ```
 
 ### Cambiar Zona Horaria
