@@ -12,6 +12,10 @@ const PORT = process.env.PORT || 3000;
 
 // ===== MIDDLEWARE =====
 
+// Configurar trust proxy para funcionar detrás de nginx/reverse proxy
+// Esto permite que express-rate-limit identifique correctamente las IPs de los usuarios
+app.set('trust proxy', 1);
+
 // Helmet para seguridad
 app.use(helmet({
   contentSecurityPolicy: false, // Desactivar para permitir imágenes base64 del QR
