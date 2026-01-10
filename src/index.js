@@ -1,14 +1,20 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
 const apiRoutes = require('./routes/api');
+const socketService = require('./services/socketService');
 
 // Crear aplicación Express
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
+
+// Inicializar Socket.IO
+socketService.initialize(server);
 
 // ===== MIDDLEWARE =====
 
@@ -145,7 +151,7 @@ app.use((err, req, res, next) => {
 
 // ===== INICIO DEL SERVIDOR =====
 
-const server = app.listen(PORT, () => {
+server.listen(PORT, () => {
   const baseUrl = process.env.API_URL || `http://localhost:${PORT}`;
   logger.info('='.repeat(50));
   logger.info(`🚀 Servidor iniciado en puerto ${PORT}`);

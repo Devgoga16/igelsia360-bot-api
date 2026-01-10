@@ -2,6 +2,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const logger = require('../utils/logger');
 const emailService = require('./emailService');
+const socketService = require('./socketService');
 const fs = require('fs');
 const path = require('path');
 
@@ -225,6 +226,9 @@ class WhatsAppService {
         // Generar QR en formato base64
         this.qrCode = await qrcode.toDataURL(qr);
         logger.info('Código QR convertido a base64 y almacenado');
+        
+        // Emitir QR via WebSocket
+        socketService.emitQR(this.qrCode);
       } catch (error) {
         logger.error('Error al generar código QR:', error);
       }
@@ -270,6 +274,10 @@ class WhatsAppService {
       // Obtener información del cliente
       const clientInfo = this.client.info;
       logger.info(`Conectado como: ${clientInfo.pushname} (${clientInfo.wid.user})`);
+      
+      // Emitir conexión via WebSocket
+      socketService.emitConnected(clientInfo);
+      socketService.emitStatus(this.getStatus());
     });
 
     // Evento: Cliente desconectado
