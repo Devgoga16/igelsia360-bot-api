@@ -7,6 +7,8 @@ const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
 const apiRoutes = require('./routes/api');
 const socketService = require('./services/socketService');
+const databaseService = require('./services/databaseService');
+const billingJobService = require('./services/billingJobService');
 
 // Crear aplicación Express
 const app = express();
@@ -108,6 +110,33 @@ app.get('/', (req, res) => {
         method: 'POST',
         path: '/api/clean-session',
         description: 'Limpiar sesión y reiniciar (útil para resolver errores de bloqueo)'
+      },
+      billing: {
+        currentPeriod: {
+          method: 'GET',
+          path: '/api/billing/current',
+          description: 'Obtener información del periodo actual'
+        },
+        periodInfo: {
+          method: 'GET',
+          path: '/api/billing/period/:period',
+          description: 'Obtener información de un periodo específico (formato: YYYY-MM)'
+        },
+        periodMessages: {
+          method: 'GET',
+          path: '/api/billing/messages/:period',
+          description: 'Obtener mensajes de un periodo (formato: YYYY-MM)'
+        },
+        allPeriods: {
+          method: 'GET',
+          path: '/api/billing/periods',
+          description: 'Obtener todos los periodos de facturación'
+        },
+        payPeriod: {
+          method: 'POST',
+          path: '/api/billing/pay/:period',
+          description: 'Marcar un periodo como pagado'
+        }
       }
     },
     documentation: 'Ver README.md para más información'
@@ -151,16 +180,37 @@ app.use((err, req, res, next) => {
 
 // ===== INICIO DEL SERVIDOR =====
 
-server.listen(PORT, () => {
-  const baseUrl = process.env.API_URL || `http://localhost:${PORT}`;
-  logger.info('='.repeat(50));
-  logger.info(`🚀 Servidor iniciado en puerto ${PORT}`);
-  logger.info(`📱 API de WhatsApp Bot - Iglesia360`);
-  logger.info(`🌐 URL: ${baseUrl}`);
-  logger.info(`📄 Documentación: ${baseUrl}`);
-  logger.info(`🔗 Ver QR: ${baseUrl}/api/qr-image`);
-  logger.info('='.repeat(50));
-});
+// Función de inicialización asíncrona
+const startServer = async () => {
+  try {
+    // 1. Conectar a MongoDB
+    logger.info('🔌 Conectando a MongoDB...');
+    await databaseService.connect();
+    
+    // 2. Iniciar jobs de facturación
+    logger.info('📅 Iniciando jobs de facturación...');
+    billingJobService.start();
+    
+    // 3. Iniciar servidor HTTP
+    server.listen(PORT, () => {
+      const baseUrl = process.env.API_URL || `http://localhost:${PORT}`;
+      logger.info('='.repeat(50));
+      logger.info(`🚀 Servidor iniciado en puerto ${PORT}`);
+      logger.info(`📱 API de WhatsApp Bot - Iglesia360`);
+      logger.info(`🌐 URL: ${baseUrl}`);
+      logger.info(`📄 Documentación: ${baseUrl}`);
+      logger.info(`🔗 Ver QR: ${baseUrl}/api/qr-image`);
+      logger.info('='.repeat(50));
+    });
+    
+  } catch (error) {
+    logger.error('Error al iniciar el servidor:', error);
+    process.exit(1);
+  }
+};
+
+// Iniciar servidor
+startServer();
 
 // Manejo de señales de terminación
 const gracefulShutdown = async (signal) => {
@@ -169,9 +219,17 @@ const gracefulShutdown = async (signal) => {
   server.close(async () => {
     logger.info('Servidor HTTP cerrado');
     
+    // Detener jobs de facturación
+    logger.info('Deteniendo jobs de facturación...');
+    billingJobService.stop();
+    
     // Importar y cerrar el servicio de WhatsApp
     const whatsappService = require('./services/whatsappService');
     await whatsappService.destroy();
+    
+    // Desconectar de MongoDB
+    logger.info('Desconectando de MongoDB...');
+    await databaseService.disconnect();
     
     logger.info('Aplicación cerrada correctamente');
     process.exit(0);

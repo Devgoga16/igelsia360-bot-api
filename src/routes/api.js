@@ -1,6 +1,8 @@
 const express = require('express');
 const whatsappService = require('../services/whatsappService');
 const logger = require('../utils/logger');
+const Message = require('../models/Message');
+const BillingPeriod = require('../models/BillingPeriod');
 
 const router = express.Router();
 
@@ -32,7 +34,31 @@ router.post('/send-message', async (req, res) => {
     // Enviar mensaje
     const result = await whatsappService.sendMessage(phoneNumber, message);
 
-    logger.info(`API: Mensaje enviado exitosamente a ${phoneNumber}`);
+    // Guardar en base de datos si fue exitoso
+    try {
+      const now = new Date();
+      const billingPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+      // Crear registro del mensaje
+      const messageRecord = new Message({
+        phoneNumber,
+        message,
+        status: 'success',
+        sentAt: now,
+        billingPeriod,
+        messageId: result.id || result._serialized || null
+      });
+
+      await messageRecord.save();
+
+      // Actualizar o crear el periodo de facturación
+      await updateBillingPeriod(billingPeriod);
+
+      logger.info(`API: Mensaje enviado y guardado exitosamente a ${phoneNumber}`);
+    } catch (dbError) {
+      logger.error('Error guardando mensaje en BD (mensaje enviado exitosamente):', dbError);
+      // No fallar el request si el mensaje se envió correctamente
+    }
 
     res.json({
       success: true,
@@ -41,6 +67,25 @@ router.post('/send-message', async (req, res) => {
     });
 
   } catch (error) {
+    // Guardar mensaje fallido en BD
+    try {
+      const now = new Date();
+      const billingPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      
+      const messageRecord = new Message({
+        phoneNumber: req.body.phoneNumber,
+        message: req.body.message,
+        status: 'failed',
+        sentAt: now,
+        billingPeriod,
+        errorMessage: error.message
+      });
+
+      await messageRecord.save();
+    } catch (dbError) {
+      logger.error('Error guardando mensaje fallido en BD:', dbError);
+    }
+
     logger.error('Error en endpoint send-message:', error);
     
     res.status(500).json({
@@ -494,6 +539,296 @@ router.post('/clean-session', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Error al limpiar la sesión'
+    });
+  }
+});
+
+// ============================================================
+// FUNCIONES AUXILIARES PARA FACTURACIÓN
+// ============================================================
+
+/**
+ * Actualiza o crea el periodo de facturación actual
+ */
+async function updateBillingPeriod(periodString) {
+  try {
+    const [year, month] = periodString.split('-').map(Number);
+    
+    // Calcular fechas del periodo
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59, 999); // Último día del mes
+    
+    // Fecha límite de pago: día 5 del siguiente mes
+    const paymentDueDate = new Date(year, month, 5, 23, 59, 59, 999);
+
+    let period = await BillingPeriod.findOne({ period: periodString });
+
+    if (!period) {
+      // Crear nuevo periodo
+      period = new BillingPeriod({
+        period: periodString,
+        startDate,
+        endDate,
+        totalMessages: 1,
+        planLimit: 500,
+        status: 'active',
+        paymentDueDate
+      });
+    } else {
+      // Incrementar contador de mensajes
+      period.totalMessages += 1;
+    }
+
+    period.calculateAmount();
+    await period.save();
+
+    logger.info(`Periodo ${periodString} actualizado: ${period.totalMessages} mensajes`);
+    return period;
+
+  } catch (error) {
+    logger.error('Error actualizando periodo de facturación:', error);
+    throw error;
+  }
+}
+
+// ============================================================
+// ENDPOINTS DE FACTURACIÓN
+// ============================================================
+
+/**
+ * @route   GET /api/billing/messages/:period
+ * @desc    Obtener todos los mensajes de un periodo
+ * @param   period - Formato YYYY-MM (ej: 2026-01)
+ */
+router.get('/billing/messages/:period', async (req, res) => {
+  try {
+    const { period } = req.params;
+    const { status } = req.query; // Opcional: 'success' o 'failed'
+
+    // Validar formato de periodo
+    if (!/^\d{4}-\d{2}$/.test(period)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Formato de periodo inválido. Use YYYY-MM'
+      });
+    }
+
+    const query = { billingPeriod: period };
+    if (status) {
+      query.status = status;
+    }
+
+    const messages = await Message.find(query)
+      .sort({ sentAt: -1 })
+      .lean();
+
+    res.json({
+      success: true,
+      data: {
+        period,
+        totalMessages: messages.length,
+        messages
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error obteniendo mensajes del periodo:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al obtener mensajes del periodo'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/billing/period/:period
+ * @desc    Obtener información del periodo de facturación
+ * @param   period - Formato YYYY-MM (ej: 2026-01)
+ */
+router.get('/billing/period/:period', async (req, res) => {
+  try {
+    const { period } = req.params;
+
+    // Validar formato de periodo
+    if (!/^\d{4}-\d{2}$/.test(period)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Formato de periodo inválido. Use YYYY-MM'
+      });
+    }
+
+    const billingPeriod = await BillingPeriod.findOne({ period }).lean();
+
+    if (!billingPeriod) {
+      return res.status(404).json({
+        success: false,
+        error: 'Periodo no encontrado'
+      });
+    }
+
+    // Calcular si está vencido
+    const now = new Date();
+    const isOverdue = now > billingPeriod.paymentDueDate && !billingPeriod.isPaid;
+
+    res.json({
+      success: true,
+      data: {
+        ...billingPeriod,
+        isOverdue,
+        exceedsLimit: billingPeriod.totalMessages > billingPeriod.planLimit,
+        extraMessages: Math.max(0, billingPeriod.totalMessages - billingPeriod.planLimit)
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error obteniendo periodo de facturación:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al obtener periodo de facturación'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/billing/periods
+ * @desc    Obtener todos los periodos de facturación
+ */
+router.get('/billing/periods', async (req, res) => {
+  try {
+    const { status } = req.query; // Opcional: 'paid', 'overdue', 'active', 'closed'
+
+    const query = {};
+    if (status) {
+      query.status = status;
+    }
+
+    const periods = await BillingPeriod.find(query)
+      .sort({ period: -1 })
+      .lean();
+
+    const now = new Date();
+    const periodsWithStatus = periods.map(period => ({
+      ...period,
+      isOverdue: now > period.paymentDueDate && !period.isPaid,
+      exceedsLimit: period.totalMessages > period.planLimit,
+      extraMessages: Math.max(0, period.totalMessages - period.planLimit)
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        totalPeriods: periodsWithStatus.length,
+        periods: periodsWithStatus
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error obteniendo periodos de facturación:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al obtener periodos de facturación'
+    });
+  }
+});
+
+/**
+ * @route   POST /api/billing/pay/:period
+ * @desc    Marcar un periodo como pagado
+ * @param   period - Formato YYYY-MM (ej: 2026-01)
+ */
+router.post('/billing/pay/:period', async (req, res) => {
+  try {
+    const { period } = req.params;
+    const { notes } = req.body;
+
+    // Validar formato de periodo
+    if (!/^\d{4}-\d{2}$/.test(period)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Formato de periodo inválido. Use YYYY-MM'
+      });
+    }
+
+    const billingPeriod = await BillingPeriod.findOne({ period });
+
+    if (!billingPeriod) {
+      return res.status(404).json({
+        success: false,
+        error: 'Periodo no encontrado'
+      });
+    }
+
+    if (billingPeriod.isPaid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Este periodo ya está pagado',
+        data: {
+          paidAt: billingPeriod.paidAt
+        }
+      });
+    }
+
+    // Actualizar notas si se proporcionan
+    if (notes) {
+      billingPeriod.notes = notes;
+    }
+
+    // Marcar como pagado
+    await billingPeriod.markAsPaid();
+
+    logger.info(`Periodo ${period} marcado como pagado`);
+
+    res.json({
+      success: true,
+      message: 'Periodo marcado como pagado exitosamente',
+      data: billingPeriod
+    });
+
+  } catch (error) {
+    logger.error('Error marcando periodo como pagado:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al procesar el pago del periodo'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/billing/current
+ * @desc    Obtener información del periodo actual
+ */
+router.get('/billing/current', async (req, res) => {
+  try {
+    const now = new Date();
+    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    let billingPeriod = await BillingPeriod.findOne({ period: currentPeriod }).lean();
+
+    if (!billingPeriod) {
+      // Crear periodo si no existe
+      await updateBillingPeriod(currentPeriod);
+      billingPeriod = await BillingPeriod.findOne({ period: currentPeriod }).lean();
+    }
+
+    const exceedsLimit = billingPeriod.totalMessages > billingPeriod.planLimit;
+    const remainingMessages = Math.max(0, billingPeriod.planLimit - billingPeriod.totalMessages);
+
+    res.json({
+      success: true,
+      data: {
+        ...billingPeriod,
+        exceedsLimit,
+        remainingMessages,
+        extraMessages: Math.max(0, billingPeriod.totalMessages - billingPeriod.planLimit),
+        usagePercentage: ((billingPeriod.totalMessages / billingPeriod.planLimit) * 100).toFixed(2)
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error obteniendo periodo actual:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al obtener periodo actual'
     });
   }
 });
