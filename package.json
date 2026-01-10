@@ -1,0 +1,36 @@
+{
+  "name": "iglesia360-bot-api",
+  "version": "1.0.0",
+  "description": "API de Bot de WhatsApp con persistencia y notificaciones",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "pm2:start": "pm2 start ecosystem.config.json",
+    "pm2:stop": "pm2 stop iglesia360-bot",
+    "pm2:restart": "pm2 restart iglesia360-bot",
+    "pm2:logs": "pm2 logs iglesia360-bot",
+    "pm2:status": "pm2 status",
+    "clean": "node -e \"const fs = require('fs'); const path = require('path'); const dir = '.wwebjs_auth'; if (fs.existsSync(dir)) { fs.rmSync(dir, { recursive: true, force: true }); console.log('Sesión limpiada'); }\"",
+    "kill-chrome": "taskkill /F /IM chrome.exe /T 2>nul || taskkill /F /IM node.exe /T 2>nul || echo No hay procesos para matar",
+    "fresh-start": "npm run kill-chrome && npm run clean && npm start"
+  },
+  "keywords": ["whatsapp", "bot", "api", "iglesia360"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode": "^1.5.3",
+    "qrcode-terminal": "^0.12.0",
+    "nodemailer": "^6.9.7",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
