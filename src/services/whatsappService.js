@@ -366,8 +366,10 @@ class WhatsAppService {
         throw new Error(`El número ${phoneNumber} no está registrado en WhatsApp`);
       }
       
-      // Enviar mensaje
-      const result = await this.client.sendMessage(chatId, message);
+      // Enviar mensaje con opciones para deshabilitar sendSeen
+      const result = await this.client.sendMessage(chatId, message, {
+        sendSeen: false
+      });
       
       logger.info(`Mensaje enviado exitosamente a ${phoneNumber}`);
       
